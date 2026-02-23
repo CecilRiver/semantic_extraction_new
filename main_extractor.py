@@ -23,16 +23,26 @@ from extractors.range_extractor import RangeExtractor
 
 # 导入格式化器
 from output_formatters.json_formatter import JsonFormatter
+from output_formatters.graph_json_formatter import GraphJsonFormatter
+
+# 导入边提取器
+from edge_extractors.edge_builder import EdgeBuilder
 
 
 class MainExtractor:
     """主提取器类"""
     
-    def __init__(self):
+    def __init__(self, extract_edges=False):
+        """
+        初始化主提取器
+        
+        Args:
+            extract_edges: 是否提取边（默认False）
+        """
         # 初始化过滤器
         self.filter = VariableFilter()
         
-        # 初始化提取器
+        # 初始化变量提取器
         self.name_extractor = NameExtractor()
         self.aliases_extractor = AliasesExtractor()
         self.type_extractor = TypeExtractor()
@@ -44,6 +54,12 @@ class MainExtractor:
         
         # 初始化格式化器
         self.json_formatter = JsonFormatter()
+        self.graph_formatter = GraphJsonFormatter()
+        
+        # 边提取配置
+        self.extract_edges = extract_edges
+        if extract_edges:
+            self.edge_builder = EdgeBuilder()
     
     def extract_from_xml_file(self, xml_file_path):
         """
@@ -119,6 +135,73 @@ class MainExtractor:
         
         return variables
     
+    def extract_edges_from_xml(self, xml_file_path):
+        """
+        从XML文件提取边
+        
+        Args:
+            xml_file_path: XML文件路径
+            
+        Returns:
+            dict: {
+                "edges": 边列表,
+                "metadata": 元数据,
+                "context": 上下文
+            }
+        """
+        if not self.extract_edges:
+            return None
+        
+        # 解析文件路径
+        xml_path = Path(xml_file_path)
+        station = self._extract_station_from_path(xml_path)
+        
+        # 解析XML
+        try:
+            xml_content = None
+            for encoding in ['gbk', 'gb2312', 'utf-8', 'latin-1']:
+                try:
+                    with open(xml_file_path, 'r', encoding=encoding) as f:
+                        xml_content = f.read()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if xml_content is None:
+                print(f"错误: 无法解码文件 {xml_file_path}")
+                return None
+            
+            root = ET.fromstring(xml_content)
+        except Exception as e:
+            print(f"错误: 解析XML失败 {xml_file_path}: {e}")
+            return None
+        
+        # 获取控制程序名称
+        program_elem = root.find(".//name")
+        program = program_elem.text if program_elem is not None and program_elem.text else "UNKNOWN"
+        
+        # 构建上下文
+        context = {
+            "station": station,
+            "program": program,
+            "xml_file": str(xml_path)
+        }
+        
+        # 查找所有element
+        elements = root.findall(".//element")
+        
+        # 构建边
+        edges = self.edge_builder.build_edges(elements, context)
+        
+        # 生成metadata
+        metadata = self.graph_formatter.generate_metadata(context)
+        
+        return {
+            "edges": edges,
+            "metadata": metadata,
+            "context": context
+        }
+    
     def _extract_variable(self, element, context):
         """
         从element提取单个变量
@@ -191,7 +274,7 @@ class MainExtractor:
                 return parts[i + 1]
         return "UNKNOWN"
     
-    def save_outputs(self, variables, output_dir, file_prefix="variables"):
+    def save_outputs(self, variables, output_dir, file_prefix="variables", edges_data=None):
         """
         保存输出到JSON文件
         
@@ -199,49 +282,81 @@ class MainExtractor:
             variables: 变量列表
             output_dir: 输出目录
             file_prefix: 文件前缀
+            edges_data: 边数据（可选），包含edges, metadata, context
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
-        # 保存干净版JSON
+        # 保存变量
         clean_file = output_path / f"{file_prefix}_clean.json"
         count = self.json_formatter.save_clean_json(variables, clean_file)
         print(f"干净版已保存到: {clean_file} (共 {count} 个变量)")
         
-        # 保存带证据版JSON
         evidence_file = output_path / f"{file_prefix}_with_evidence.json"
         count = self.json_formatter.save_evidence_json(variables, evidence_file)
         print(f"带证据版已保存到: {evidence_file} (共 {count} 个变量)")
+        
+        # 保存图（如果有边数据）
+        if edges_data:
+            nodes = [v["variable_data"] for v in variables]
+            self.graph_formatter.save_graph_json(
+                nodes=nodes,
+                edges=edges_data["edges"],
+                metadata=edges_data["metadata"],
+                output_dir="output/extracted_graphs",
+                file_prefix=file_prefix
+            )
 
 
 def main():
     """主函数"""
-    # 示例：处理单个XML文件
-    xml_file = r"input\XML格式控制程序\10\UserView\SCS02.xml"
+    import argparse
     
-    if len(sys.argv) > 1:
-        xml_file = sys.argv[1]
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='XML变量和图结构提取器')
+    parser.add_argument('xml_file', nargs='?', 
+                       default=r"input\XML格式控制程序\10\UserView\SCS02.xml",
+                       help='XML文件路径')
+    parser.add_argument('--extract-edges', action='store_true',
+                       help='是否提取边（图结构）')
     
-    print(f"开始处理文件: {xml_file}")
+    args = parser.parse_args()
+    
+    print(f"开始处理文件: {args.xml_file}")
+    if args.extract_edges:
+        print("模式: 变量 + 图结构提取")
+    else:
+        print("模式: 仅变量提取")
     print("="*60)
     
     # 创建提取器
-    extractor = MainExtractor()
+    extractor = MainExtractor(extract_edges=args.extract_edges)
     
     # 提取变量
-    variables = extractor.extract_from_xml_file(xml_file)
+    variables = extractor.extract_from_xml_file(args.xml_file)
     
     print(f"\n提取完成！共提取 {len(variables)} 个变量")
+    
+    # 提取边（如果启用）
+    edges_data = None
+    if args.extract_edges:
+        print("="*60)
+        print("开始提取图结构...")
+        edges_data = extractor.extract_edges_from_xml(args.xml_file)
+        if edges_data:
+            print(f"提取完成！共提取 {len(edges_data['edges'])} 条边")
+    
     print("="*60)
     
     # 保存输出
-    xml_path = Path(xml_file)
+    xml_path = Path(args.xml_file)
     file_prefix = f"{extractor._extract_station_from_path(xml_path)}_{xml_path.stem}"
     
     extractor.save_outputs(
         variables, 
         output_dir="output/extracted_variables",
-        file_prefix=file_prefix
+        file_prefix=file_prefix,
+        edges_data=edges_data
     )
     
     print("\n处理完成！")
@@ -249,4 +364,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 

@@ -1,0 +1,67 @@
+{
+  "comment": "AT_type 到边类型和eta的映射配置",
+  "version": "1.0",
+  
+  "mappings": {
+    "LOGICAL_OPERATORS": {
+      "types": ["AND", "OR", "NOT", "XOR", "NAND", "NOR"],
+      "edge_type": "guard",
+      "eta": 1.0,
+      "description": "逻辑运算符"
+    },
+    "COMPARISON_OPERATORS": {
+      "types": ["LT", "GT", "LE", "GE", "EQ", "NE"],
+      "edge_type": "guard",
+      "eta": 1.0,
+      "description": "比较运算符"
+    },
+    "ARITHMETIC_OPERATORS": {
+      "types": ["ADD", "SUB", "MUL", "DIV", "MOD"],
+      "edge_type": "data",
+      "eta": 1.0,
+      "description": "算术运算符"
+    },
+    "TIMER_BLOCKS": {
+      "types": ["HSTP", "HSTON", "HSTOF", "HSTPUL"],
+      "edge_type": "call",
+      "eta": 1.0,
+      "description": "定时器功能块"
+    },
+    "CONTROL_BLOCKS": {
+      "patterns": ["HSSCS*", "SCS*"],
+      "edge_type": "call",
+      "eta": 1.0,
+      "description": "顺序控制功能块"
+    },
+    "PID_BLOCKS": {
+      "patterns": ["*PID*"],
+      "edge_type": "call",
+      "eta": 0.6,
+      "description": "PID控制器"
+    },
+    "HFOP_BLOCKS": {
+      "patterns": ["HFOP*"],
+      "edge_type": "call",
+      "eta": 0.6,
+      "description": "HFOP功能块"
+    },
+    "RATE_LIMITER_BLOCKS": {
+      "patterns": ["*RATE*", "*SLEW*", "*LIMIT*"],
+      "edge_type": "call",
+      "eta": 0.8,
+      "description": "限速器/限幅器"
+    },
+    "LATCH_BLOCKS": {
+      "types": ["LS", "RS", "SR"],
+      "edge_type": "call",
+      "eta": 1.0,
+      "description": "锁存器/状态保持"
+    }
+  },
+  
+  "default": {
+    "edge_type": "call",
+    "eta": 1.0,
+    "description": "未知类型默认为call"
+  }
+}

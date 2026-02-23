@@ -1,0 +1,47 @@
+{
+  "comment": "eta 值计算规则配置",
+  "version": "1.0",
+  
+  "rules": [
+    {
+      "name": "PID控制器",
+      "condition": {
+        "at_type_contains": ["PID"]
+      },
+      "eta": 0.6,
+      "description": "PID功能块链路的典型调节与动态环节"
+    },
+    {
+      "name": "HFOP功能块",
+      "condition": {
+        "at_type_starts_with": ["HFOP"]
+      },
+      "eta": 0.6,
+      "description": "HFOP功能块链路"
+    },
+    {
+      "name": "限速限幅器",
+      "condition": {
+        "at_type_contains": ["RATE", "SLEW", "LIMIT", "LIMITER"]
+      },
+      "eta": 0.8,
+      "description": "Rate Limiter / Slew Rate 限速/限幅类算子"
+    },
+    {
+      "name": "条件与赋值",
+      "condition": {
+        "edge_type": ["guard", "data"]
+      },
+      "eta": 1.0,
+      "description": "条件与赋值类依赖（IF/CASE守卫、直接赋值/一般算术求值）"
+    }
+  ],
+  
+  "default_eta": 1.0,
+  
+  "validation": {
+    "min": 0.0,
+    "max": 1.0,
+    "description": "eta值必须在0到1之间"
+  }
+}

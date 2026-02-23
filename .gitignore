@@ -84,6 +84,7 @@ venv.bak/
 # IDE设置
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
@@ -125,3 +126,5 @@ Desktop.ini
 .directory
 .Trash-*
 
+# OpenSpec工作目录
+openspec/
