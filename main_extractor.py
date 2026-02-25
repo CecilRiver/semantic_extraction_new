@@ -32,12 +32,13 @@ from edge_extractors.edge_builder import EdgeBuilder
 class MainExtractor:
     """主提取器类"""
     
-    def __init__(self, extract_edges=False):
+    def __init__(self, extract_edges=False, extract_predicates=False):
         """
         初始化主提取器
         
         Args:
             extract_edges: 是否提取边（默认False）
+            extract_predicates: 是否提取谓词（默认False）
         """
         # 初始化过滤器
         self.filter = VariableFilter()
@@ -60,6 +61,17 @@ class MainExtractor:
         self.extract_edges = extract_edges
         if extract_edges:
             self.edge_builder = EdgeBuilder()
+        
+        # 谓词提取配置
+        self.extract_predicates = extract_predicates
+        if extract_predicates:
+            from predicate_extractors.hazard_extractor import HazardExtractor
+            from predicate_extractors.protection_extractor import ProtectionExtractor
+            from output_formatters.predicate_formatter import PredicateFormatter
+            
+            self.hazard_extractor = HazardExtractor()
+            self.protection_extractor = ProtectionExtractor()
+            self.predicate_formatter = PredicateFormatter()
     
     def extract_from_xml_file(self, xml_file_path):
         """
@@ -202,6 +214,71 @@ class MainExtractor:
             "context": context
         }
     
+    def extract_predicates_from_xml(self, xml_file_path):
+        """
+        从XML文件提取谓词
+        
+        Args:
+            xml_file_path: XML文件路径
+            
+        Returns:
+            dict: {
+                "protections": [...],
+                "hazards": [...],
+                "context": {...}
+            }
+        """
+        if not self.extract_predicates:
+            return None
+        
+        # 解析文件路径
+        xml_path = Path(xml_file_path)
+        station = self._extract_station_from_path(xml_path)
+        
+        # 解析XML
+        try:
+            xml_content = None
+            for encoding in ['gbk', 'gb2312', 'utf-8', 'latin-1']:
+                try:
+                    with open(xml_file_path, 'r', encoding=encoding) as f:
+                        xml_content = f.read()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if xml_content is None:
+                print(f"错误: 无法解码文件 {xml_file_path}")
+                return None
+            
+            root = ET.fromstring(xml_content)
+        except Exception as e:
+            print(f"错误: 解析XML失败 {xml_file_path}: {e}")
+            return None
+        
+        # 获取控制程序名称
+        program_elem = root.find(".//name")
+        program = program_elem.text if program_elem is not None and program_elem.text else "UNKNOWN"
+        
+        # 构建上下文
+        context = {
+            "station": station,
+            "program": program,
+            "xml_file": str(xml_path)
+        }
+        
+        # 查找所有element
+        elements = root.findall(".//element")
+        
+        # 提取谓词
+        protections = self.protection_extractor.extract_protections(elements, context)
+        hazards = self.hazard_extractor.extract_hazards(elements, context)
+        
+        return {
+            "protections": protections,
+            "hazards": hazards,
+            "context": context
+        }
+    
     def _extract_variable(self, element, context):
         """
         从element提取单个变量
@@ -274,7 +351,7 @@ class MainExtractor:
                 return parts[i + 1]
         return "UNKNOWN"
     
-    def save_outputs(self, variables, output_dir, file_prefix="variables", edges_data=None):
+    def save_outputs(self, variables, output_dir, file_prefix="variables", edges_data=None, predicates_data=None):
         """
         保存输出到JSON文件
         
@@ -283,6 +360,7 @@ class MainExtractor:
             output_dir: 输出目录
             file_prefix: 文件前缀
             edges_data: 边数据（可选），包含edges, metadata, context
+            predicates_data: 谓词数据（可选），包含protections, hazards, context
         """
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -306,6 +384,15 @@ class MainExtractor:
                 output_dir="output/extracted_graphs",
                 file_prefix=file_prefix
             )
+        
+        # 保存谓词（如果有谓词数据）
+        if predicates_data:
+            self.predicate_formatter.save_predicates_json(
+                protections=predicates_data["protections"],
+                hazards=predicates_data["hazards"],
+                output_dir="output/extracted_predicates",
+                file_prefix=file_prefix
+            )
 
 
 def main():
@@ -319,18 +406,25 @@ def main():
                        help='XML文件路径')
     parser.add_argument('--extract-edges', action='store_true',
                        help='是否提取边（图结构）')
+    parser.add_argument('--extract-predicates', action='store_true',
+                       help='是否提取谓词（P和H）')
     
     args = parser.parse_args()
     
     print(f"开始处理文件: {args.xml_file}")
+    mode_parts = ["变量提取"]
     if args.extract_edges:
-        print("模式: 变量 + 图结构提取")
-    else:
-        print("模式: 仅变量提取")
+        mode_parts.append("图结构提取")
+    if args.extract_predicates:
+        mode_parts.append("谓词提取")
+    print(f"模式: {' + '.join(mode_parts)}")
     print("="*60)
     
     # 创建提取器
-    extractor = MainExtractor(extract_edges=args.extract_edges)
+    extractor = MainExtractor(
+        extract_edges=args.extract_edges,
+        extract_predicates=args.extract_predicates
+    )
     
     # 提取变量
     variables = extractor.extract_from_xml_file(args.xml_file)
@@ -346,6 +440,17 @@ def main():
         if edges_data:
             print(f"提取完成！共提取 {len(edges_data['edges'])} 条边")
     
+    # 提取谓词（如果启用）
+    predicates_data = None
+    if args.extract_predicates:
+        print("="*60)
+        print("开始提取谓词...")
+        predicates_data = extractor.extract_predicates_from_xml(args.xml_file)
+        if predicates_data:
+            p_count = len(predicates_data['protections'])
+            h_count = len(predicates_data['hazards'])
+            print(f"提取完成！共提取 {p_count} 个防护谓词(P)，{h_count} 个危害谓词(H)")
+    
     print("="*60)
     
     # 保存输出
@@ -356,7 +461,8 @@ def main():
         variables, 
         output_dir="output/extracted_variables",
         file_prefix=file_prefix,
-        edges_data=edges_data
+        edges_data=edges_data,
+        predicates_data=predicates_data
     )
     
     print("\n处理完成！")

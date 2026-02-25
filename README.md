@@ -6,9 +6,11 @@
 
 - 🔍 **变量提取**：自动提取工程点位和常量，包含8个字段（name, aliases, type, scope, attackable等）
 - 🕸️ **图结构提取**：提取变量间的依赖关系，构建控制逻辑图（nodes + edges）
+- 🛡️ **谓词提取**：自动识别防护谓词(P)和危害谓词(H)，支持偏差型和阈值型模式
+- 📦 **统一输出**：将变量、图、谓词整合到单个 JSON 文件，简化数据访问（NEW）
 - 📊 **边分类**：自动将边分类为 data（数据依赖）、guard（守卫依赖）、call（连线依赖）
 - ⚖️ **权重计算**：基于功能块类型计算 eta 权重（PID=0.6, 限速器=0.8, 其他=1.0）
-- 📝 **证据追溯**：每个字段和边都有完整的提取依据，支持审计
+- 📝 **证据追溯**：每个字段、边和谓词都有完整的提取依据，支持审计
 - 🔧 **可配置**：通过配置文件自定义 AT_type 映射和 eta 规则
 
 ## 📁 项目结构
@@ -24,21 +26,29 @@ semantic_extraction_new/
 │   ├── default_value_extractor.py  # Default Value字段提取
 │   ├── rate_extractor.py           # Rate字段提取
 │   └── range_extractor.py          # Range字段提取
-├── edge_extractors/         # 边提取器模块（NEW）
+├── edge_extractors/         # 边提取器模块
 │   ├── connection_tracer.py        # 连接路径追踪器
 │   ├── type_classifier.py          # 边类型分类器
 │   ├── eta_calculator.py           # eta权重计算器
 │   └── edge_builder.py             # 核心边构建逻辑
+├── predicate_extractors/    # 谓词提取器模块（NEW）
+│   ├── pattern_matcher.py          # XML模式匹配器
+│   ├── hazard_extractor.py         # 危害谓词提取
+│   ├── protection_extractor.py     # 防护谓词提取
+│   └── base_predicate_extractor.py # 谓词提取基类
 ├── filters/                 # 变量过滤器模块
 │   └── variable_filter.py          # 判断哪些变量需要提取
 ├── output_formatters/       # 输出格式化模块
 │   ├── json_formatter.py           # 变量JSON格式输出
-│   └── graph_json_formatter.py     # 图JSON格式输出（NEW）
-├── config/                  # 配置文件（NEW）
+│   ├── graph_json_formatter.py     # 图JSON格式输出
+│   ├── predicate_formatter.py      # 谓词JSON格式输出
+│   └── unified_formatter.py        # 统一格式输出（NEW）
+├── config/                  # 配置文件
 │   ├── at_type_mapping.json        # AT_type映射规则
 │   └── eta_rules.json              # eta计算规则
 ├── main_extractor.py        # 主提取脚本
-├── batch_extractor_auto.py  # 批量提取脚本
+├── batch_extractor.py       # 批量提取脚本
+├── unified_extractor.py     # 统一格式批量提取（NEW）
 └── input/XML格式控制程序/   # 输入XML文件
 ```
 
@@ -51,7 +61,7 @@ semantic_extraction_new/
 python main_extractor.py
 
 # 批量处理
-python batch_extractor_auto.py
+python batch_extractor.py
 ```
 
 ### 2. 提取变量 + 图结构
@@ -61,13 +71,39 @@ python batch_extractor_auto.py
 python main_extractor.py --extract-edges
 
 # 批量处理（包含边提取）
-python batch_extractor_auto.py --extract-edges
+python batch_extractor.py --extract-edges
 ```
 
-### 3. 指定文件
+### 3. 提取变量 + 谓词（NEW）
 
 ```bash
-python main_extractor.py "input\XML格式控制程序\10\UserView\其他文件.xml" --extract-edges
+# 单个文件（包含谓词提取）
+python main_extractor.py --extract-predicates
+
+# 同时提取图结构和谓词
+python main_extractor.py --extract-edges --extract-predicates
+
+# 批量处理（包含谓词提取）
+python batch_extractor.py --extract-predicates
+```
+
+### 4. 统一格式输出（NEW）
+
+```bash
+# 批量生成统一格式（D+G+P+H 在一个文件中）
+python unified_extractor.py
+
+# 跳过确认提示
+python unified_extractor.py -y
+
+# 自定义输出目录
+python unified_extractor.py --output custom/unified/
+```
+
+### 5. 指定文件
+
+```bash
+python main_extractor.py "input\XML格式控制程序\10\UserView\其他文件.xml" --extract-predicates
 ```
 
 ## 📊 输出格式
@@ -170,10 +206,95 @@ output/
 ├── extracted_variables/      # 变量输出
 │   ├── 10_SCS02_clean.json
 │   └── 10_SCS02_with_evidence.json
-└── extracted_graphs/         # 图结构输出（--extract-edges）
-    ├── 10_SCS02_graph_clean.json
-    └── 10_SCS02_graph_with_evidence.json
+├── extracted_graphs/         # 图结构输出（--extract-edges）
+│   ├── 10_SCS02_graph_clean.json
+│   └── 10_SCS02_graph_with_evidence.json
+└── extracted_predicates/     # 谓词输出（--extract-predicates，NEW）
+    ├── 10_SCS02_predicates_clean.json
+    └── 10_SCS02_predicates_with_evidence.json
 ```
+
+### 谓词输出（NEW）
+
+使用 `--extract-predicates` 参数时，系统自动识别防护谓词(P)和危害谓词(H)：
+
+#### 1. 谓词干净版 - `*_predicates_clean.json`
+
+```json
+{
+  "P": [
+    {
+      "id": "P1_turbine_master_to_manual",
+      "name": "汽机主控切手动",
+      "kind": "deviation",
+      "ref_var": "19_CCS02_AMCCS21.AV",
+      "proc_var": "19_CCS02_AMCCS14.AV",
+      "cmp": "GT",
+      "delta": 70.0,
+      "guards": []
+    }
+  ],
+  "H": [
+    {
+      "id": "H1_main_steam_pressure_high",
+      "name": "锅炉主蒸汽压力高",
+      "kind": "threshold",
+      "var": "10_FSSS01B_130@LBF10AA101XB12.AV",
+      "cmp": "<",
+      "threshold": 5.0
+    }
+  ]
+}
+```
+
+#### 2. 谓词带证据版 - `*_predicates_with_evidence.json`
+
+包含每个谓词的完整提取依据：
+
+```json
+{
+  "P": [
+    {
+      "predicate": {
+        "id": "P1_turbine_master_to_manual",
+        "name": "汽机主控切手动",
+        "kind": "deviation",
+        ...
+      },
+      "evidence": {
+        "pattern_type": "deviation",
+        "sub_element": "123",
+        "abs_element": "124",
+        "gt_element": "125",
+        "ref_var_evidence": {...},
+        "proc_var_evidence": {...},
+        "delta_element": "126"
+      }
+    }
+  ],
+  "H": [...]
+}
+```
+
+### 谓词模式识别算法
+
+系统自动识别两类谓词模式：
+
+**1. 偏差型防护谓词（Deviation Pattern）**
+- XML模式：`SUB` → `ABS` → `GT/LT`
+- 示例：`|setpoint - process_value| > delta` → "主控切手动"
+- 用途：检测设定值和过程值的偏差是否超出允许范围
+
+**2. 阈值型谓词（Threshold Pattern）**
+- XML模式：`GT/LT/GE/LE` + 单变量 + 常量
+- 示例：`pressure < 5.0` → "压力低报警"
+- 防护谓词：Comment包含"切手动"、"主控"关键词
+- 危害谓词：Comment包含"高"、"低"、"跳闸"关键词
+
+**3. 投票逻辑（Voting Logic）**
+- XML模式：`HS3SEL2`（3取2冗余）
+- 示例：3个跳闸信号中任意2个触发 → "汽机跳闸"
+- 用途：提高安全关键信号的可靠性
 
 ```
 
@@ -509,11 +630,102 @@ python main_extractor.py --extract-edges
 
 查看 `*_graph_with_evidence.json` 中的 `evidence.e_type` 字段，包含完整的分类依据。
 
-## 📚 依赖
+### Q6: 谓词提取的识别准确率如何？（NEW）
 
-仅使用 Python 标准库，无需安装第三方依赖。
+系统基于模式匹配，依赖Comment注释中的关键词来区分P/H类型。建议人工复核提取结果的准确性。
 
-## 🎯 版本
+### Q7: 为什么有些防护/危害条件没有被提取？
 
-- **v1.0.0**：变量提取基础功能
-- **v2.0.0**：新增图结构提取功能（NEW）
+当前版本仅识别XML中的特定模式（SUB→ABS→GT、GT+constant、HS3SEL2）。复杂的逻辑组合或非标准模式可能无法识别。
+
+## ⚠️ 已知限制
+
+### 谓词提取限制（NEW）
+
+1. **模式覆盖**：仅识别偏差型、阈值型和3取2投票逻辑，复杂的逻辑组合需要人工补充
+2. **关键词依赖**：P/H分类依赖Comment中的关键词（"切手动"、"高"、"低"等），缺失注释会导致分类失败
+3. **变量名解析**：依赖现有变量字典，未识别的变量会使用`UNRESOLVED_<id>`作为占位符
+4. **Guards提取**：仅识别AND逻辑组合的guards，OR或更复杂的逻辑需要扩展
+
+---
+
+## 📦 统一输出格式（NEW v3.0）
+
+### 概述
+
+统一输出格式将分散在三个目录的数据（变量、图、谓词）整合到单个 JSON 文件中，提供完整的控制程序视图。
+
+**适用场景**:
+- ✅ 需要整体分析或导出完整数据
+- ✅ 数据交换和集成
+- ✅ 简化后续处理流程
+
+**文件位置**: `output/unified/`
+
+### 统一 JSON 结构
+
+```json
+{
+  "metadata": {
+    "station": "19",
+    "program": "CCS02",
+    "xml_file": "...",
+    "extracted_at": "2026-02-25T22:28:15",
+    "extractor_version": "3.0.0"
+  },
+  "D": {
+    "vars": [...]  // 变量列表
+  },
+  "G": {
+    "edges": [...]  // 边列表
+  },
+  "P": [...],  // 防护谓词
+  "H": [...]   // 危害谓词
+}
+```
+
+### 使用统一提取器
+
+```bash
+# 基本使用（带确认）
+python unified_extractor.py
+
+# 跳过确认
+python unified_extractor.py -y
+
+# 自定义输出目录
+python unified_extractor.py --output my_output/
+
+# 查看帮助
+python unified_extractor.py --help
+```
+
+### 输出文件
+
+每个 XML 生成 2 个文件：
+- `{station}_{program}_unified_clean.json` - Clean 版本
+- `{station}_{program}_unified_with_evidence.json` - Evidence 版本
+
+### 与分散输出的对比
+
+| 特性 | 分散输出 | 统一输出 |
+|------|----------|----------|
+| 文件数量 | 6 个/XML | 2 个/XML |
+| 数据访问 | 需要读取多个文件 | 单文件完整数据 |
+| 选择性提取 | ✅ 支持 | ❌ 总是完整提取 |
+| 文件大小 | 分散，每个较小 | 集中，单文件较大 |
+| 使用场景 | 日常分析 | 完整导出、数据交换 |
+
+### 注意事项
+
+⚠️ **文件大小**: 统一 JSON 通常较大（可能超过 50MB），超过 100MB 时会发出警告  
+⚠️ **内存消耗**: 批量处理时逐文件处理并释放内存  
+⚠️ **数据一致性**: 统一输出是独立提取，与分散输出可能存在时间差
+
+---
+
+## ❓ 常见问题
+
+### Q1: 为什么提取的变量数量比 XML 中的元素少？
+
+只提取**工程点位**和**常量**，内部中间变量会被过滤。
