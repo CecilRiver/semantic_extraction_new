@@ -12,25 +12,111 @@ from datetime import datetime
 class UnifiedFormatter:
     """统一格式化器 - 生成 D/G/P/H 统一输出"""
     
+    def _deduplicate_by_name(self, vars_list):
+        """
+        简单去重 - 保留第一个出现的记录
+        
+        Args:
+            vars_list: 变量列表
+            
+        Returns:
+            list: 去重后的变量列表
+        """
+        seen = set()
+        result = []
+        duplicates_found = 0
+        
+        for var in vars_list:
+            name = var.get('name')
+            if name not in seen:
+                seen.add(name)
+                result.append(var)
+            else:
+                duplicates_found += 1
+        
+        if duplicates_found > 0:
+            print(f"  [警告] UnifiedFormatter检测到 {duplicates_found} 个重复变量（已去重）")
+        
+        return result
+    
     def format_clean(self, variables, edges, protections, hazards, metadata=None):
         """
         生成 clean 版本统一输出
         
         Args:
-            variables: 变量列表
-            edges: 边列表
-            protections: 防护谓词列表
-            hazards: 危害谓词列表
+            variables: 变量列表（可能是嵌套或扁平结构）
+            edges: 边列表（可能是嵌套或扁平结构）
+            protections: 防护谓词列表（可能是嵌套或扁平结构）
+            hazards: 危害谓词列表（可能是嵌套或扁平结构）
             metadata: 可选的元数据
             
         Returns:
             dict: {"D": {"vars": []}, "G": {"edges": []}, "P": [], "H": []}
         """
+        # 扁平化变量数据
+        vars_clean = []
+        for item in variables:
+            if isinstance(item, dict):
+                if "variable_data" in item:
+                    # 嵌套结构，提取 variable_data
+                    vars_clean.append(item["variable_data"])
+                else:
+                    # 已经是扁平结构
+                    vars_clean.append(item)
+            else:
+                vars_clean.append(item)
+        
+        # 扁平化边数据
+        edges_clean = []
+        for item in edges:
+            if isinstance(item, dict):
+                # 边数据可能是 {"edge": {...}} 或 {"variable_data": {...}, "evidence_data": {...}} 格式
+                if "edge" in item:
+                    # 格式1: {"edge": {...}, "evidence": {...}}
+                    edges_clean.append(item["edge"])
+                elif "variable_data" in item:
+                    # 格式2: {"variable_data": {...}, "evidence_data": {...}}（边的实际格式）
+                    edges_clean.append(item["variable_data"])
+                else:
+                    # 已经是扁平结构
+                    edges_clean.append(item)
+            else:
+                edges_clean.append(item)
+        
+        # 扁平化防护谓词数据
+        p_clean = []
+        for item in protections:
+            if isinstance(item, dict):
+                if "predicate" in item:
+                    # 嵌套结构，提取 predicate
+                    p_clean.append(item["predicate"])
+                else:
+                    # 已经是扁平结构
+                    p_clean.append(item)
+            else:
+                p_clean.append(item)
+        
+        # 扁平化危害谓词数据
+        h_clean = []
+        for item in hazards:
+            if isinstance(item, dict):
+                if "predicate" in item:
+                    # 嵌套结构，提取 predicate
+                    h_clean.append(item["predicate"])
+                else:
+                    # 已经是扁平结构
+                    h_clean.append(item)
+            else:
+                h_clean.append(item)
+        
+        # 防御性去重检查（只对变量）
+        vars_clean = self._deduplicate_by_name(vars_clean)
+        
         unified = {
-            "D": {"vars": variables},
-            "G": {"edges": edges},
-            "P": protections,
-            "H": hazards
+            "D": {"vars": vars_clean},
+            "G": {"edges": edges_clean},
+            "P": p_clean,
+            "H": h_clean
         }
         
         # 添加可选的 metadata
@@ -64,6 +150,9 @@ class UnifiedFormatter:
                 vars_clean.append(var_with_ev)
             else:
                 vars_clean.append(item)
+        
+        # 防御性去重检查
+        vars_clean = self._deduplicate_by_name(vars_clean)
         
         # 提取 edges 和 evidence
         edges_clean = []

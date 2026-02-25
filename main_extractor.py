@@ -32,14 +32,16 @@ from edge_extractors.edge_builder import EdgeBuilder
 class MainExtractor:
     """主提取器类"""
     
-    def __init__(self, extract_edges=False, extract_predicates=False):
+    def __init__(self, extract_edges=False, extract_predicates=False, deduplicate_variables=True):
         """
         初始化主提取器
         
         Args:
             extract_edges: 是否提取边（默认False）
             extract_predicates: 是否提取谓词（默认False）
+            deduplicate_variables: 是否对变量去重（默认True）
         """
+        self.deduplicate_variables = deduplicate_variables
         # 初始化过滤器
         self.filter = VariableFilter()
         
@@ -144,6 +146,10 @@ class MainExtractor:
             variable = self._extract_variable(element, context)
             if variable:
                 variables.append(variable)
+        
+        # 去重（如果启用）
+        if self.deduplicate_variables and variables:
+            variables = self._deduplicate_variables(variables)
         
         return variables
     
@@ -341,6 +347,85 @@ class MainExtractor:
             "variable_data": variable_data,
             "evidence_data": evidence_data
         }
+    
+    def _merge_evidence(self, target_evidence, source_evidence, merge_count):
+        """
+        合并 evidence 信息
+        
+        Args:
+            target_evidence: 目标 evidence（会被修改）
+            source_evidence: 源 evidence（用于合并）
+            merge_count: 当前合并次数（用于生成唯一键）
+        """
+        for key, value in source_evidence.items():
+            if key not in target_evidence:
+                # 键不存在，直接添加
+                target_evidence[key] = value
+            else:
+                # 键已存在，添加序号后缀
+                new_key = f"{key}_{merge_count}"
+                target_evidence[new_key] = value
+    
+    def _deduplicate_variables(self, variables):
+        """
+        对变量列表进行去重，合并 evidence 信息
+        
+        Args:
+            variables: 变量列表，每个变量包含 variable_data 和 evidence_data
+            
+        Returns:
+            list: 去重后的变量列表
+        """
+        seen = {}  # name -> {record, merge_count}
+        original_count = len(variables)
+        
+        for record in variables:
+            name = record['variable_data']['name']
+            
+            if name not in seen:
+                # 第一次见到这个变量
+                seen[name] = {
+                    'record': record,
+                    'merge_count': 1
+                }
+            else:
+                # 已存在，合并 evidence
+                seen_data = seen[name]
+                merge_count = seen_data['merge_count'] + 1
+                
+                # 检查 variable_data 是否一致
+                existing_var = seen_data['record']['variable_data']
+                current_var = record['variable_data']
+                
+                # 比较关键字段（排除 name）
+                key_fields = ['type', 'scope', 'attackable']
+                for field in key_fields:
+                    if existing_var.get(field) != current_var.get(field):
+                        print(f"警告: 变量 {name} 的 {field} 字段不一致: {existing_var.get(field)} vs {current_var.get(field)}")
+                
+                # 合并 evidence
+                self._merge_evidence(
+                    seen_data['record']['evidence_data'],
+                    record['evidence_data'],
+                    merge_count
+                )
+                
+                # 更新合并计数
+                seen_data['merge_count'] = merge_count
+        
+        # 添加 merged_count 到 evidence
+        for name_data in seen.values():
+            if name_data['merge_count'] > 1:
+                name_data['record']['evidence_data']['merged_count'] = name_data['merge_count']
+        
+        # 提取去重后的记录
+        deduplicated = [data['record'] for data in seen.values()]
+        
+        # 记录统计
+        if original_count > len(deduplicated):
+            print(f"变量去重: {original_count} 个 -> {len(deduplicated)} 个（去除 {original_count - len(deduplicated)} 个重复）")
+        
+        return deduplicated
     
     def _extract_station_from_path(self, xml_path):
         """从文件路径中提取控制站编号"""
